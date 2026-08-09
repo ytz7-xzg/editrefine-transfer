@@ -1,0 +1,70 @@
+name: Test HF and ModelScope Access
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install clients
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub modelscope-hub
+
+      - name: Test Hugging Face access
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+
+          api = HfApi(token=token)
+
+          files = api.list_repo_files(
+              repo_id="Yixuan-Ding-ZJU/EditRefine",
+              repo_type="model",
+              token=token,
+          )
+
+          print("HF ACCESS OK")
+          print("File count:", len(files))
+
+          for f in files:
+              print(f)
+          PY
+
+      - name: Test ModelScope access
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from modelscope_hub import HubApi
+
+          token = os.environ["MODELSCOPE_TOKEN"]
+
+          api = HubApi(token=token)
+
+          user = api.whoami()
+
+          print("MODELSCOPE ACCESS OK")
+          print("User:", user.username)
+
+          repo = api.get_repo(
+              "YTZ7AAS/EditRefine",
+              "model",
+          )
+
+          print("TARGET REPO OK")
+          print(repo)
+          PY
