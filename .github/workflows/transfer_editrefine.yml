@@ -40,9 +40,9 @@ jobs:
           from modelscope_hub import HubApi
 
 
-          # =========================================================
-          # 配置
-          # =========================================================
+          # ==========================================================
+          # 1. 基本配置
+          # ==========================================================
 
           SRC_REPO = "Yixuan-Ding-ZJU/EditRefine"
           DST_REPO = "YTZ7AAS/EditRefine"
@@ -50,42 +50,173 @@ jobs:
           HF_TOKEN = os.environ["HF_TOKEN"]
           MS_TOKEN = os.environ["MODELSCOPE_TOKEN"]
 
-          HF_HOME = Path("/tmp/editrefine_hf_cache")
-
-
-          # =========================================================
-          # 初始化
-          # =========================================================
 
           print("=" * 80)
-          print("SOURCE:", SRC_REPO)
-          print("TARGET:", DST_REPO)
+          print("EditRefine Transfer")
+          print("=" * 80)
+          print("SOURCE :", SRC_REPO)
+          print("TARGET :", DST_REPO)
           print("=" * 80)
 
-          hf_api = HfApi(token=HF_TOKEN)
-          ms_api = HubApi(token=MS_TOKEN)
+
+          # ==========================================================
+          # 2. 初始化 API
+          # ==========================================================
+
+          hf_api = HfApi(
+              token=HF_TOKEN
+          )
+
+          ms_api = HubApi(
+              token=MS_TOKEN
+          )
 
 
-          # =========================================================
-          # 验证 ModelScope 登录
-          # =========================================================
+          # ==========================================================
+          # 3. 验证 Hugging Face
+          # ==========================================================
+
+          print()
+          print("Checking Hugging Face access...")
+
+          hf_info = hf_api.model_info(
+              repo_id=SRC_REPO,
+              token=HF_TOKEN,
+          )
+
+          print(
+              "Hugging Face OK:",
+              hf_info.id
+          )
+
+
+          # ==========================================================
+          # 4. 验证 ModelScope
+          # ==========================================================
+
+          print()
+          print("Checking ModelScope access...")
 
           user = ms_api.whoami()
 
-          print()
-          print("ModelScope user:", user.username)
+          print(
+              "ModelScope user:",
+              user.username
+          )
 
-          repo = ms_api.get_repo(
+          ms_api.get_repo(
               DST_REPO,
               "model",
           )
 
-          print("Target repository OK:", DST_REPO)
+          print(
+              "ModelScope repository OK:",
+              DST_REPO
+          )
 
 
-          # =========================================================
-          # 获取 HF 全部文件 + 文件大小
-          # =========================================================
+          # ==========================================================
+          # 5. 一个重要函数：
+          #
+          # ModelScope 新版本 list_repo_files() 返回 FileInfo
+          # 而不是普通 str。
+          #
+          # 所以这里统一转换成文件路径字符串。
+          # ==========================================================
+
+          def normalize_repo_files(items):
+
+              result = set()
+
+              for item in items:
+
+                  # 旧版本：直接返回字符串
+                  if isinstance(item, str):
+                      result.add(item)
+                      continue
+
+                  # 新版本 FileInfo
+                  found = False
+
+                  for attr in (
+                      "path",
+                      "name",
+                      "file_path",
+                      "filename",
+                      "Path",
+                      "Name",
+                  ):
+
+                      value = getattr(
+                          item,
+                          attr,
+                          None,
+                      )
+
+                      if value:
+
+                          value = str(value)
+
+                          # 去除意外的开头 /
+                          value = value.lstrip("/")
+
+                          result.add(value)
+
+                          found = True
+                          break
+
+                  # 如果对象支持 to_dict
+                  if not found:
+
+                      try:
+
+                          data = item.to_dict()
+
+                          for key in (
+                              "path",
+                              "name",
+                              "file_path",
+                              "filename",
+                          ):
+
+                              value = data.get(key)
+
+                              if value:
+
+                                  result.add(
+                                      str(value).lstrip("/")
+                                  )
+
+                                  found = True
+                                  break
+
+                      except Exception:
+                          pass
+
+
+                  if not found:
+
+                      print(
+                          "WARNING: Cannot parse ModelScope FileInfo:"
+                      )
+
+                      print(
+                          "  type =",
+                          type(item)
+                      )
+
+                      print(
+                          "  repr =",
+                          repr(item)
+                      )
+
+
+              return result
+
+
+          # ==========================================================
+          # 6. 获取 Hugging Face 文件列表
+          # ==========================================================
 
           print()
           print("Reading Hugging Face repository tree...")
@@ -99,143 +230,221 @@ jobs:
               )
           )
 
+
           files = [
               item
               for item in tree
               if isinstance(item, RepoFile)
           ]
 
+
+          # 小文件优先，大权重后传
           files.sort(
               key=lambda x: x.size or 0
           )
 
+
           total_size = sum(
-              x.size or 0
-              for x in files
+              item.size or 0
+              for item in files
           )
 
+
           print()
-          print("HF files:", len(files))
           print(
-              "Total size:",
-              f"{total_size / 1024**3:.2f} GiB"
+              "HF file count:",
+              len(files)
           )
 
+          print(
+              "HF total size:",
+              f"{total_size / 1024**3:.3f} GiB"
+          )
+
+
           print()
-          print("Files:")
-          for i, item in enumerate(files, 1):
-              size_gib = (item.size or 0) / 1024**3
+          print("=" * 80)
+          print("SOURCE FILE LIST")
+          print("=" * 80)
+
+
+          for i, item in enumerate(
+              files,
+              1,
+          ):
+
+              size = (
+                  (item.size or 0)
+                  / 1024**3
+              )
+
               print(
-                  f"{i:03d}. "
-                  f"{item.path:<70} "
-                  f"{size_gib:8.3f} GiB"
+                  f"{i:03d}/{len(files):03d}  "
+                  f"{size:8.3f} GiB  "
+                  f"{item.path}"
               )
 
 
-          # =========================================================
-          # 获取 ModelScope 已存在文件
+          # ==========================================================
+          # 7. 获取 ModelScope 已有文件
           #
-          # 这样 workflow 中途中断以后重新运行，
-          # 已经成功上传的文件直接跳过。
-          # =========================================================
+          # 这里是上次出错的地方。
+          # 现在已经修正，不再直接 set(FileInfo)。
+          # ==========================================================
 
           print()
-          print("Reading existing ModelScope files...")
+          print("=" * 80)
+          print("CHECK EXISTING MODELSCOPE FILES")
+          print("=" * 80)
+
 
           try:
-              existing = set(
-                  ms_api.list_repo_files(
-                      DST_REPO,
-                      "model",
-                  )
+
+              raw_existing = ms_api.list_repo_files(
+                  DST_REPO,
+                  "model",
               )
+
+              existing = normalize_repo_files(
+                  raw_existing
+              )
+
           except Exception as e:
+
               print(
-                  "Could not list existing files, "
-                  "continue without skip:",
-                  repr(e),
+                  "WARNING: list_repo_files failed:",
+                  repr(e)
               )
+
               existing = set()
 
+
           print(
-              "Existing destination files:",
+              "Existing ModelScope files:",
               len(existing)
           )
 
 
-          # =========================================================
-          # 逐文件搬运
-          # =========================================================
+          for path in sorted(existing):
+
+              print(
+                  "  EXISTS:",
+                  path
+              )
+
+
+          # ==========================================================
+          # 8. 开始逐文件搬运
+          # ==========================================================
 
           uploaded = 0
           skipped = 0
+          failed = 0
 
-          for idx, item in enumerate(files, 1):
 
-              remote_path = item.path
-              file_size = item.size or 0
+          for index, item in enumerate(
+              files,
+              1,
+          ):
+
+              remote_path = (
+                  item.path
+                  .lstrip("/")
+              )
+
+              file_size = (
+                  item.size or 0
+              )
+
 
               print()
               print("=" * 80)
               print(
-                  f"[{idx}/{len(files)}] "
-                  f"{remote_path}"
+                  f"[{index}/{len(files)}]"
               )
               print(
-                  "Size:",
+                  "FILE:",
+                  remote_path
+              )
+              print(
+                  "SIZE:",
                   f"{file_size / 1024**3:.3f} GiB"
               )
 
-              # -----------------------------------------------------
-              # 已经上传则跳过
-              # -----------------------------------------------------
+
+              # ======================================================
+              # 已经存在就跳过
+              # ======================================================
 
               if remote_path in existing:
-                  print("SKIP: already exists on ModelScope")
+
+                  print(
+                      "SKIP: already exists on ModelScope"
+                  )
+
                   skipped += 1
+
                   continue
 
 
-              # -----------------------------------------------------
-              # 检查磁盘
-              # -----------------------------------------------------
+              # ======================================================
+              # 检查 runner 剩余空间
+              # ======================================================
 
-              free = shutil.disk_usage("/").free
+              disk = shutil.disk_usage(
+                  "/"
+              )
+
+              free_gib = (
+                  disk.free
+                  / 1024**3
+              )
 
               print(
                   "Runner free disk:",
-                  f"{free / 1024**3:.2f} GiB"
+                  f"{free_gib:.2f} GiB"
               )
 
-              # 给系统至少留 2 GiB
-              if file_size > free - 2 * 1024**3:
+
+              # 至少给系统留 2 GiB
+              required = (
+                  file_size
+                  + 2 * 1024**3
+              )
+
+
+              if disk.free < required:
+
                   raise RuntimeError(
-                      f"Not enough disk for {remote_path}: "
-                      f"file={file_size/1024**3:.2f} GiB, "
-                      f"free={free/1024**3:.2f} GiB"
+                      "Not enough runner disk space. "
+                      f"File={file_size/1024**3:.2f} GiB, "
+                      f"Free={free_gib:.2f} GiB"
                   )
 
 
-              # -----------------------------------------------------
-              # 每个文件建立单独临时目录
-              # -----------------------------------------------------
+              # ======================================================
+              # 每个文件使用独立临时目录
+              # ======================================================
 
               temp_dir = Path(
                   tempfile.mkdtemp(
-                      prefix="editrefine_",
+                      prefix="editrefine_transfer_",
                       dir="/tmp",
                   )
               )
 
+
               try:
 
-                  # -------------------------------------------------
-                  # 1. 从 Hugging Face 下载单个文件
-                  # -------------------------------------------------
+                  # ==================================================
+                  # 9. 从 HF 下载这个文件
+                  # ==================================================
 
+                  print()
                   print(
                       "Downloading from Hugging Face..."
                   )
+
 
                   local_path = hf_hub_download(
                       repo_id=SRC_REPO,
@@ -245,33 +454,51 @@ jobs:
                       local_dir=str(temp_dir),
                   )
 
-                  local_path = Path(local_path)
+
+                  local_path = Path(
+                      local_path
+                  )
+
 
                   if not local_path.exists():
+
                       raise RuntimeError(
-                          f"Download missing: {local_path}"
+                          "HF download did not create file: "
+                          + str(local_path)
                       )
 
-                  local_size = local_path.stat().st_size
+
+                  downloaded_size = (
+                      local_path
+                      .stat()
+                      .st_size
+                  )
+
 
                   print(
-                      "Downloaded:",
+                      "HF DOWNLOAD OK"
+                  )
+
+                  print(
+                      "Local file:",
                       local_path
                   )
 
                   print(
                       "Downloaded size:",
-                      f"{local_size / 1024**3:.3f} GiB"
+                      f"{downloaded_size / 1024**3:.3f} GiB"
                   )
 
 
-                  # -------------------------------------------------
-                  # 2. 上传到 ModelScope 相同路径
-                  # -------------------------------------------------
+                  # ==================================================
+                  # 10. 上传到 ModelScope
+                  # ==================================================
 
+                  print()
                   print(
                       "Uploading to ModelScope..."
                   )
+
 
                   ms_api.upload_file(
                       DST_REPO,
@@ -280,82 +507,218 @@ jobs:
                       remote_path,
                   )
 
+
+                  print()
                   print(
                       "UPLOAD OK:",
                       remote_path
                   )
 
+
                   uploaded += 1
+
+                  # 本轮成功后加入 existing
+                  # 防止同一个 workflow 中重复
+                  existing.add(
+                      remote_path
+                  )
+
+
+              except Exception as e:
+
+                  failed += 1
+
+                  print()
+                  print(
+                      "TRANSFER FAILED:",
+                      remote_path
+                  )
+
+                  print(
+                      "ERROR:",
+                      repr(e)
+                  )
+
+                  raise
 
 
               finally:
 
-                  # -------------------------------------------------
-                  # 3. 立刻清理当前文件
-                  # -------------------------------------------------
+                  # ==================================================
+                  # 11. 每完成一个文件立即清理
+                  # ==================================================
 
+                  print()
                   print(
                       "Cleaning temporary files..."
                   )
+
 
                   shutil.rmtree(
                       temp_dir,
                       ignore_errors=True,
                   )
 
-                  shutil.rmtree(
-                      HF_HOME,
-                      ignore_errors=True,
+
+                  # HF 有时会产生缓存
+                  for cache in (
+                      Path.home() / ".cache/huggingface",
+                      Path("/tmp/huggingface"),
+                  ):
+
+                      if cache.exists():
+
+                          shutil.rmtree(
+                              cache,
+                              ignore_errors=True,
+                          )
+
+
+                  disk_after = shutil.disk_usage(
+                      "/"
                   )
 
 
-          # =========================================================
-          # 最终验证
-          # =========================================================
+                  print(
+                      "Free disk after cleanup:",
+                      f"{disk_after.free / 1024**3:.2f} GiB"
+                  )
+
+
+          # ==========================================================
+          # 12. 所有文件循环结束
+          # ==========================================================
 
           print()
           print("=" * 80)
           print("TRANSFER LOOP FINISHED")
           print("=" * 80)
 
-          final_files = set(
-              ms_api.list_repo_files(
-                  DST_REPO,
-                  "model",
-              )
+          print(
+              "Uploaded this run:",
+              uploaded
           )
 
-          src_names = {
-              x.path
-              for x in files
+          print(
+              "Skipped:",
+              skipped
+          )
+
+          print(
+              "Failed:",
+              failed
+          )
+
+
+          # ==========================================================
+          # 13. 最终重新读取 ModelScope 文件
+          #
+          # 这里也是上次报错的地方。
+          # 已经改成 normalize_repo_files()
+          # ==========================================================
+
+          print()
+          print(
+              "Refreshing ModelScope repository file list..."
+          )
+
+
+          raw_final = ms_api.list_repo_files(
+              DST_REPO,
+              "model",
+          )
+
+
+          final_files = normalize_repo_files(
+              raw_final
+          )
+
+
+          src_files = {
+              item.path.lstrip("/")
+              for item in files
           }
 
+
           missing = sorted(
-              src_names - final_files
+              src_files
+              - final_files
           )
 
-          print("Source files :", len(src_names))
-          print("Target files :", len(final_files))
-          print("Uploaded now :", uploaded)
-          print("Skipped      :", skipped)
-          print("Missing      :", len(missing))
+
+          extra = sorted(
+              final_files
+              - src_files
+          )
+
+
+          print()
+          print("=" * 80)
+          print("FINAL VERIFICATION")
+          print("=" * 80)
+
+          print(
+              "Source file count:",
+              len(src_files)
+          )
+
+          print(
+              "Target file count:",
+              len(final_files)
+          )
+
+          print(
+              "Missing:",
+              len(missing)
+          )
+
+          print(
+              "Extra:",
+              len(extra)
+          )
+
 
           if missing:
+
               print()
-              print("Missing files:")
-              for x in missing:
-                  print(" -", x)
+              print(
+                  "MISSING FILES:"
+              )
+
+              for path in missing:
+
+                  print(
+                      "  MISSING:",
+                      path
+                  )
+
 
               raise RuntimeError(
                   f"Transfer incomplete: "
-                  f"{len(missing)} files missing"
+                  f"{len(missing)} source files "
+                  "are missing from ModelScope"
               )
 
+
+          # ==========================================================
+          # 14. 成功
+          # ==========================================================
+
           print()
-          print("========================================")
+          print("=" * 80)
           print("SUCCESS")
-          print("HF -> ModelScope transfer completed.")
-          print("Target:", DST_REPO)
-          print("========================================")
+          print("=" * 80)
+          print(
+              "All Hugging Face files are present on ModelScope."
+          )
+          print(
+              "Source:",
+              SRC_REPO
+          )
+          print(
+              "Target:",
+              DST_REPO
+          )
+          print("=" * 80)
 
           PY
